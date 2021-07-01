@@ -25,6 +25,8 @@ public final class FormatUtil {
     //Used to prepare xmpp output
     private static final Pattern LOGCOLOR_PATTERN = Pattern.compile("\\x1B\\[([0-9]{1,2}(;[0-9]{1,2})?)?[m|K]");
     private static final Pattern URL_PATTERN = Pattern.compile("((?:(?:https?)://)?[\\w-_\\.]{2,})\\.([a-zA-Z]{2,3}(?:/\\S+)?)");
+    //Used to strip ANSI control codes from console
+    private static final Pattern ANSI_CONTROL_PATTERN = Pattern.compile("\u001B(?:\\[0?m|\\[38;2(?:;\\d{1,3}){3}m|\\[([0-9]{1,2}[;m]?){3})");
 
     private FormatUtil() {
     }
@@ -43,6 +45,13 @@ public final class FormatUtil {
             return null;
         }
         return stripColor(input, REPLACE_ALL_PATTERN);
+    }
+
+    public static String stripAnsi(final String input) {
+        if (input == null) {
+            return null;
+        }
+        return stripColor(input, ANSI_CONTROL_PATTERN);
     }
 
     //This is the general permission sensitive message format function, checks for urls.
@@ -148,16 +157,27 @@ public final class FormatUtil {
         return builder.toString();
     }
 
-    public static String unformatString(final IUser user, final String permBase, String message) {
+    public static String unformatString(final String message) {
         if (message == null) {
             return null;
         }
-        final EnumSet<ChatColor> supported = getSupported(user, permBase);
+        return unformatString(message, EnumSet.allOf(ChatColor.class), true);
+    }
 
-        // RGB Codes
+    public static String unformatString(final IUser user, final String permBase, final String message) {
+        if (message == null) {
+            return null;
+        }
+        return unformatString(message, getSupported(user, permBase), user.isAuthorized(permBase + ".rgb"));
+    }
+
+    public static String unformatString(String message, final EnumSet<ChatColor> supported, boolean rgb) {
+        if (message == null) {
+            return null;
+        }
+
         final StringBuffer rgbBuilder = new StringBuffer();
         final Matcher rgbMatcher = STRIP_RGB_PATTERN.matcher(message);
-        final boolean rgb = user.isAuthorized(permBase + ".rgb");
         while (rgbMatcher.find()) {
             final String code = rgbMatcher.group(1).replace(String.valueOf(ChatColor.COLOR_CHAR), "");
             if (rgb) {

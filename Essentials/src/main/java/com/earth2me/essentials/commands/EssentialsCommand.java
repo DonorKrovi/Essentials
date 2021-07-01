@@ -4,29 +4,30 @@ import com.earth2me.essentials.CommandSource;
 import com.earth2me.essentials.IEssentialsModule;
 import com.earth2me.essentials.Trade;
 import com.earth2me.essentials.User;
-import com.earth2me.essentials.utils.FormatUtil;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import net.ess3.api.IEssentials;
+import org.bukkit.ChatColor;
 import org.bukkit.Server;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.PluginIdentifiableCommand;
-import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.util.StringUtil;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.UUID;
+import java.util.MissingResourceException;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static com.earth2me.essentials.I18n.tl;
 
@@ -40,12 +41,42 @@ public abstract class EssentialsCommand implements IEssentialsCommand {
      * Common date diffs, for use in tab completion
      */
     protected static final List<String> COMMON_DATE_DIFFS = ImmutableList.of("1m", "15m", "1h", "3h", "12h", "1d", "1w", "1mo", "1y");
+    private static final Pattern ARGUMENT_PATTERN = Pattern.compile("([ :>])(([\\[<])[A-Za-z |]+[>\\]])");
+
     private final transient String name;
+    private final transient Map<String, String> usageStrings = new LinkedHashMap<>();
     protected transient IEssentials ess;
     protected transient IEssentialsModule module;
 
     protected EssentialsCommand(final String name) {
         this.name = name;
+        int i = 1;
+        try {
+            // This is not actually infinite, it will throw an unchecked exception if a resource key is missing
+            //noinspection InfiniteLoopStatement
+            while (true) {
+                final String baseKey = name + "CommandUsage" + i;
+                addUsageString(tl(baseKey), tl(baseKey + "Description"));
+                i++;
+            }
+        } catch (MissingResourceException ignored) {
+        }
+    }
+
+    private void addUsageString(final String usage, final String description) {
+        final StringBuffer buffer = new StringBuffer();
+        final Matcher matcher = ARGUMENT_PATTERN.matcher(usage);
+        while (matcher.find()) {
+            final String color = matcher.group(3).equals("<") ? tl("commandArgumentRequired") : tl("commandArgumentOptional");
+            matcher.appendReplacement(buffer, "$1" + color + matcher.group(2).replace("|", ChatColor.RED + "|" + color) + ChatColor.RESET);
+        }
+        matcher.appendTail(buffer);
+        usageStrings.put(buffer.toString(), description);
+    }
+
+    @Override
+    public Map<String, String> getUsageStrings() {
+        return usageStrings;
     }
 
     public static String getFinalArg(final String[] args, final int start) {
@@ -59,16 +90,8 @@ public abstract class EssentialsCommand implements IEssentialsCommand {
         return bldr.toString();
     }
 
-    private static boolean canInteractWith(final User interactor, final User interactee) {
-        if (interactor == null) {
-            return !interactee.isHidden();
-        }
-
-        if (interactor.equals(interactee)) {
-            return true;
-        }
-
-        return interactor.getBase().canSee(interactee.getBase());
+    private boolean canInteractWith(final User interactor, final User interactee) {
+        return ess.canInteractWith(interactor, interactee);
     }
 
     @Override
@@ -130,64 +153,7 @@ public abstract class EssentialsCommand implements IEssentialsCommand {
     }
 
     private User getPlayer(final Server server, final User sourceUser, final String searchTerm, final boolean getHidden, final boolean getOffline) throws PlayerNotFoundException {
-        final User user;
-        Player exPlayer;
-
-        try {
-            exPlayer = server.getPlayer(UUID.fromString(searchTerm));
-        } catch (final IllegalArgumentException ex) {
-            if (getOffline) {
-                exPlayer = server.getPlayerExact(searchTerm);
-            } else {
-                exPlayer = server.getPlayer(searchTerm);
-            }
-        }
-
-        if (exPlayer != null) {
-            user = ess.getUser(exPlayer);
-        } else {
-            user = ess.getUser(searchTerm);
-        }
-
-        if (user != null) {
-            if (!getOffline && !user.getBase().isOnline()) {
-                throw new PlayerNotFoundException();
-            }
-
-            if (getHidden || canInteractWith(sourceUser, user)) {
-                return user;
-            } else { // not looking for hidden and cannot interact (i.e is hidden)
-                if (getOffline && user.getName().equalsIgnoreCase(searchTerm)) { // if looking for offline and got an exact match
-                    return user;
-                }
-            }
-            throw new PlayerNotFoundException();
-        }
-        final List<Player> matches = server.matchPlayer(searchTerm);
-
-        if (matches.isEmpty()) {
-            final String matchText = searchTerm.toLowerCase(Locale.ENGLISH);
-            for (final User userMatch : ess.getOnlineUsers()) {
-                if (getHidden || canInteractWith(sourceUser, userMatch)) {
-                    final String displayName = FormatUtil.stripFormat(userMatch.getDisplayName()).toLowerCase(Locale.ENGLISH);
-                    if (displayName.contains(matchText)) {
-                        return userMatch;
-                    }
-                }
-            }
-        } else {
-            for (final Player player : matches) {
-                final User userMatch = ess.getUser(player);
-                if (userMatch.getDisplayName().startsWith(searchTerm) && (getHidden || canInteractWith(sourceUser, userMatch))) {
-                    return userMatch;
-                }
-            }
-            final User userMatch = ess.getUser(matches.get(0));
-            if (getHidden || canInteractWith(sourceUser, userMatch)) {
-                return userMatch;
-            }
-        }
-        throw new PlayerNotFoundException();
+        return ess.matchUser(server, sourceUser, searchTerm, getHidden, getOffline);
     }
 
     @Override
@@ -249,15 +215,7 @@ public abstract class EssentialsCommand implements IEssentialsCommand {
     }
 
     boolean canInteractWith(final CommandSource interactor, final User interactee) {
-        if (interactor == null) {
-            return !interactee.isHidden();
-        }
-
-        if (interactor.isPlayer()) {
-            return canInteractWith(ess.getUser(interactor.getPlayer()), interactee);
-        }
-
-        return true; // console
+        return ess.canInteractWith(interactor, interactee);
     }
 
     /**

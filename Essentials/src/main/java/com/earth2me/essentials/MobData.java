@@ -3,13 +3,17 @@ package com.earth2me.essentials;
 import com.earth2me.essentials.craftbukkit.InventoryWorkaround;
 import com.earth2me.essentials.utils.EnumUtil;
 import com.earth2me.essentials.utils.StringUtil;
+import com.earth2me.essentials.utils.VersionUtil;
 import org.bukkit.DyeColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Ageable;
+import org.bukkit.entity.Axolotl;
+import org.bukkit.entity.ChestedHorse;
 import org.bukkit.entity.Creeper;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.ExperienceOrb;
+import org.bukkit.entity.Goat;
 import org.bukkit.entity.Horse;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Phantom;
@@ -95,11 +99,13 @@ public enum MobData {
     ALL_BLACK_CAT("allblack", MobCompat.CAT, MobCompat.CatType.BLACK, true),
     BABY_ZOMBIE("baby", EntityType.ZOMBIE.getEntityClass(), Data.BABYZOMBIE, true),
     ADULT_ZOMBIE("adult", EntityType.ZOMBIE.getEntityClass(), Data.ADULTZOMBIE, true),
+    NETHERITE_SWORD_ZOMBIE("netheritesword", EntityType.ZOMBIE.getEntityClass(), EnumUtil.getMaterial("NETHERITE_SWORD"), true),
     DIAMOND_SWORD_ZOMBIE("diamondsword", EntityType.ZOMBIE.getEntityClass(), Material.DIAMOND_SWORD, true),
     GOLD_SWORD_ZOMBIE("goldsword", EntityType.ZOMBIE.getEntityClass(), EnumUtil.getMaterial("GOLDEN_SWORD", "GOLD_SWORD"), true),
     IRON_SWORD_ZOMBIE("ironsword", EntityType.ZOMBIE.getEntityClass(), Material.IRON_SWORD, true),
     STONE_SWORD_ZOMBIE("stonesword", EntityType.ZOMBIE.getEntityClass(), Material.STONE_SWORD, false),
     SWORD_ZOMBIE("sword", EntityType.ZOMBIE.getEntityClass(), Material.STONE_SWORD, true),
+    NETHERITE_SWORD_SKELETON("netheritesword", EntityType.SKELETON, EnumUtil.getMaterial("NETHERITE_SWORD"), true),
     DIAMOND_SWORD_SKELETON("diamondsword", EntityType.SKELETON, Material.DIAMOND_SWORD, true),
     GOLD_SWORD_SKELETON("goldsword", EntityType.SKELETON, EnumUtil.getMaterial("GOLDEN_SWORD", "GOLD_SWORD"), true),
     IRON_SWORD_SKELETON("ironsword", EntityType.SKELETON, Material.IRON_SWORD, true),
@@ -183,6 +189,8 @@ public enum MobData {
     RAID_LEADER("leader", MobCompat.RAIDER, Data.RAID_LEADER, true),
     TROPICAL_FISH_BODY_COLOR("fish_body_color", Arrays.stream(DyeColor.values()).map(color -> color.name().toLowerCase(Locale.ENGLISH) + "body").collect(Collectors.toList()), MobCompat.TROPICAL_FISH, Data.FISH_BODY_COLOR, true),
     TROPICAL_FISH_PATTERN_COLOR("fish_pattern_color", Arrays.stream(DyeColor.values()).map(color -> color.name().toLowerCase(Locale.ENGLISH) + "pattern").collect(Collectors.toList()), MobCompat.TROPICAL_FISH, Data.FISH_PATTERN_COLOR, true),
+    COLORABLE_AXOLOTL("", Arrays.stream(Axolotl.Variant.values()).map(color -> color.name().toLowerCase(Locale.ENGLISH)).collect(Collectors.toList()), MobCompat.AXOLOTL, Data.COLORABLE, true),
+    SCREAMING_GOAT("screaming", MobCompat.GOAT, Data.GOAT_SCREAMING, true),
     ;
 
     public static final Logger logger = Logger.getLogger("Essentials");
@@ -258,12 +266,22 @@ public enum MobData {
     }
 
     public void setData(final Entity spawned, final Player target, final String rawData) throws Exception {
+        if (value == null) {
+            return;
+        }
+
         if (this.value.equals(Data.ANGRY)) {
             ((Wolf) spawned).setAngry(true);
         } else if (this.value.equals(Data.ADULT)) {
             ((Ageable) spawned).setAdult();
         } else if (this.value.equals(Data.BABY)) {
             ((Ageable) spawned).setBaby();
+        } else if (this.value.equals(Data.CHEST)) {
+            if (VersionUtil.getServerBukkitVersion().isHigherThanOrEqualTo(VersionUtil.v1_11_R01)) {
+                ((ChestedHorse) spawned).setCarryingChest(true);
+            } else {
+                ((Horse) spawned).setCarryingChest(true);
+            }
         } else if (this.value.equals(Data.ADULTZOMBIE)) {
             ((Zombie) spawned).setBaby(false);
         } else if (this.value.equals(Data.BABYZOMBIE)) {
@@ -350,6 +368,8 @@ public enum MobData {
                     break;
                 }
             }
+        } else if (this.value.equals(Data.GOAT_SCREAMING)) {
+            ((Goat) spawned).setScreaming(true);
         } else if (this.value instanceof String) {
             final String[] split = ((String) this.value).split(":");
             switch (split[0]) {
@@ -377,6 +397,10 @@ public enum MobData {
                 case "fox":
                     MobCompat.setFoxType(spawned, split[1]);
                     break;
+                case "axolotl": {
+                    MobCompat.setAxolotlVariant(spawned, split[1]);
+                    break;
+                }
             }
         } else {
             logger.warning("Unknown mob data type: " + this.toString());
@@ -400,5 +424,6 @@ public enum MobData {
         RAID_LEADER,
         FISH_BODY_COLOR,
         FISH_PATTERN_COLOR,
+        GOAT_SCREAMING,
     }
 }

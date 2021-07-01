@@ -277,13 +277,26 @@ public final class Enchantments {
     }
 
     public static Enchantment getByName(final String name) {
+        if (name == null || name.isEmpty()) {
+            return null;
+        }
         Enchantment enchantment = null;
         if (isFlat) { // 1.13+ only
-            enchantment = Enchantment.getByKey(NamespacedKey.minecraft(name.toLowerCase()));
+            try {
+                enchantment = Enchantment.getByKey(NamespacedKey.minecraft(name.toLowerCase()));
+            } catch (IllegalArgumentException ignored) {
+                // NamespacedKey throws IAE if key does not match regex
+            }
         }
 
         if (enchantment == null) {
             enchantment = Enchantment.getByName(name.toUpperCase());
+        }
+        if (enchantment == null) {
+            enchantment = Enchantment.getByName(name.toLowerCase());
+        }
+        if (enchantment == null) {
+            enchantment = Enchantment.getByName(name);
         }
         if (enchantment == null) {
             enchantment = ENCHANTMENTS.get(name.toLowerCase(Locale.ENGLISH));
@@ -300,5 +313,21 @@ public final class Enchantments {
 
     public static Set<String> keySet() {
         return ENCHANTMENTS.keySet();
+    }
+
+    public static void registerEnchantment(String name, Enchantment enchantment) {
+        if (ENCHANTMENTS.containsKey(name) || ALIASENCHANTMENTS.containsKey(name)) {
+            return;
+        }
+
+        ENCHANTMENTS.put(name, enchantment);
+    }
+
+    public static void registerAlias(String name, Enchantment enchantment) {
+        if (ENCHANTMENTS.containsKey(name) || ALIASENCHANTMENTS.containsKey(name) || !ENCHANTMENTS.containsValue(enchantment)) {
+            return;
+        }
+
+        ALIASENCHANTMENTS.put(name, enchantment);
     }
 }
