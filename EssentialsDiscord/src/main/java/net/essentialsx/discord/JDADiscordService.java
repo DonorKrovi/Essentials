@@ -4,7 +4,9 @@ import club.minnced.discord.webhook.WebhookClient;
 import club.minnced.discord.webhook.WebhookClientBuilder;
 import club.minnced.discord.webhook.send.WebhookMessage;
 import club.minnced.discord.webhook.send.WebhookMessageBuilder;
+import com.earth2me.essentials.User;
 import com.earth2me.essentials.utils.FormatUtil;
+import com.earth2me.essentials.utils.VersionUtil;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.Guild;
@@ -13,6 +15,8 @@ import net.dv8tion.jda.api.entities.Webhook;
 import net.dv8tion.jda.api.events.ShutdownEvent;
 import net.dv8tion.jda.api.hooks.EventListener;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
+import net.ess3.nms.refl.providers.AchievementListenerProvider;
+import net.ess3.nms.refl.providers.AdvancementListenerProvider;
 import net.essentialsx.api.v2.events.discord.DiscordMessageEvent;
 import net.essentialsx.api.v2.services.discord.DiscordService;
 import net.essentialsx.api.v2.services.discord.InteractionController;
@@ -28,7 +32,10 @@ import net.essentialsx.discord.listeners.DiscordCommandDispatcher;
 import net.essentialsx.discord.listeners.DiscordListener;
 import net.essentialsx.discord.util.ConsoleInjector;
 import net.essentialsx.discord.util.DiscordUtil;
+import net.essentialsx.discord.util.MessageUtil;
+import org.apache.commons.lang.math.NumberUtils;
 import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
 import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.ServicePriority;
@@ -63,6 +70,7 @@ public class JDADiscordService implements DiscordService {
     private ConsoleInjector injector;
     private DiscordCommandDispatcher commandDispatcher;
     private InteractionControllerImpl interactionController;
+    private boolean invalidStartup = false;
 
     public JDADiscordService(EssentialsDiscord plugin) {
         this.plugin = plugin;
@@ -135,6 +143,7 @@ public class JDADiscordService implements DiscordService {
 
         logger.log(Level.INFO, tl("discordLoggingIn"));
         if (plugin.getSettings().getBotToken().replace("INSERT-TOKEN-HERE", "").trim().isEmpty()) {
+            invalidStartup = true;
             throw new IllegalArgumentException(tl("discordErrorNoToken"));
         }
 
@@ -148,21 +157,29 @@ public class JDADiscordService implements DiscordService {
         logger.log(Level.INFO, tl("discordLoggingInDone", jda.getSelfUser().getAsTag()));
 
         if (jda.getGuilds().isEmpty()) {
+            invalidStartup = true;
             throw new IllegalArgumentException(tl("discordErrorNoGuildSize"));
         }
 
         guild = jda.getGuildById(plugin.getSettings().getGuildId());
         if (guild == null) {
+            invalidStartup = true;
             throw new IllegalArgumentException(tl("discordErrorNoGuild"));
         }
 
         interactionController = new InteractionControllerImpl(this);
+        // Each will throw an exception if disabled
         try {
             interactionController.registerCommand(new ExecuteCommand(this));
+        } catch (InteractionException ignored) {
+        }
+        try {
             interactionController.registerCommand(new MessageCommand(this));
+        } catch (InteractionException ignored) {
+        }
+        try {
             interactionController.registerCommand(new ListCommand(this));
         } catch (InteractionException ignored) {
-            // won't happen
         }
 
         updatePrimaryChannel();
@@ -171,7 +188,22 @@ public class JDADiscordService implements DiscordService {
 
         updateTypesRelay();
 
+        // We will see you in the future :balloon:
+        // DiscordUtil.cleanWebhooks(guild, DiscordUtil.CONSOLE_RELAY_NAME);
+        // DiscordUtil.cleanWebhooks(guild, DiscordUtil.ADVANCED_RELAY_NAME);
+
         Bukkit.getPluginManager().registerEvents(new BukkitListener(this), plugin);
+
+        try {
+            if (VersionUtil.getServerBukkitVersion().isHigherThanOrEqualTo(VersionUtil.v1_12_0_R01)) {
+                Bukkit.getPluginManager().registerEvents(new AdvancementListenerProvider(), plugin);
+            } else {
+                Bukkit.getPluginManager().registerEvents(new AchievementListenerProvider(), plugin);
+            }
+        } catch (final Throwable e) {
+            logger.log(Level.WARNING, "Error while loading the achievement/advancement listener. You will not receive achievement/advancement notifications on Discord.", e);
+        }
+
         getPlugin().getEss().scheduleSyncDelayedTask(() -> DiscordUtil.dispatchDiscordMessage(JDADiscordService.this, MessageType.DefaultTypes.SERVER_START, getSettings().getStartMessage(), true, null, null, null));
 
         Bukkit.getServicesManager().register(DiscordService.class, this, plugin, ServicePriority.Normal);
@@ -184,8 +216,8 @@ public class JDADiscordService implements DiscordService {
 
     @Override
     public void registerMessageType(Plugin plugin, MessageType type) {
-        if (!type.getKey().matches("^[a-z0-9-]*$")) {
-            throw new IllegalArgumentException("MessageType key must match \"^[a-z0-9-]*$\"");
+        if (!type.getKey().matches("^[a-z][a-z0-9-]*$")) {
+            throw new IllegalArgumentException("MessageType key must match \"^[a-z][a-z0-9-]*$\"");
         }
 
         if (registeredTypes.containsKey(type.getKey())) {
@@ -197,7 +229,7 @@ public class JDADiscordService implements DiscordService {
 
     @Override
     public void sendMessage(MessageType type, String message, boolean allowGroupMentions) {
-        if (!registeredTypes.containsKey(type.getKey())) {
+        if (!registeredTypes.containsKey(type.getKey()) && !NumberUtils.isDigits(type.getKey())) {
             logger.warning("Sending message to channel \"" + type.getKey() + "\" which is an unregistered type! If you are a plugin author, you should be registering your MessageType before using them.");
         }
         final DiscordMessageEvent event = new DiscordMessageEvent(type, FormatUtil.stripFormat(message), allowGroupMentions);
@@ -206,6 +238,24 @@ public class JDADiscordService implements DiscordService {
         } else {
             Bukkit.getScheduler().runTask(plugin, () -> Bukkit.getPluginManager().callEvent(event));
         }
+    }
+
+    @Override
+    public void sendChatMessage(final Player player, final String chatMessage) {
+        final User user = getPlugin().getEss().getUser(player);
+
+        final String formattedMessage = MessageUtil.formatMessage(getSettings().getMcToDiscordFormat(player),
+                MessageUtil.sanitizeDiscordMarkdown(player.getName()),
+                MessageUtil.sanitizeDiscordMarkdown(player.getDisplayName()),
+                user.isAuthorized("essentials.discord.markdown") ? chatMessage : MessageUtil.sanitizeDiscordMarkdown(chatMessage),
+                MessageUtil.sanitizeDiscordMarkdown(getPlugin().getEss().getSettings().getWorldAlias(player.getWorld().getName())),
+                MessageUtil.sanitizeDiscordMarkdown(FormatUtil.stripEssentialsFormat(getPlugin().getEss().getPermissionsHandler().getPrefix(player))),
+                MessageUtil.sanitizeDiscordMarkdown(FormatUtil.stripEssentialsFormat(getPlugin().getEss().getPermissionsHandler().getSuffix(player))));
+
+        final String avatarUrl = DiscordUtil.getAvatarUrl(this, player);
+        final String name = getSettings().isShowName() ? player.getName() : (getSettings().isShowDisplayName() ? player.getDisplayName() : null);
+
+        DiscordUtil.dispatchDiscordMessage(this, MessageType.DefaultTypes.CHAT, formattedMessage, user.isAuthorized("essentials.discord.ping"), avatarUrl, name, player.getUniqueId());
     }
 
     @Override
@@ -229,7 +279,7 @@ public class JDADiscordService implements DiscordService {
     }
 
     public void updateTypesRelay() {
-        if (!getSettings().isShowAvatar() && !getSettings().isShowName()) {
+        if (!getSettings().isShowAvatar() && !getSettings().isShowName() && !getSettings().isShowDisplayName()) {
             for (WebhookClient webhook : channelIdToWebhook.values()) {
                 webhook.close();
             }
@@ -248,9 +298,7 @@ public class JDADiscordService implements DiscordService {
                 continue;
             }
 
-            final String webhookName = "EssX Advanced Relay";
-            Webhook webhook = DiscordUtil.getAndCleanWebhooks(channel, webhookName).join();
-            webhook = webhook == null ? DiscordUtil.createWebhook(channel, webhookName).join() : webhook;
+            final Webhook webhook = DiscordUtil.getOrCreateWebhook(channel, DiscordUtil.ADVANCED_RELAY_NAME).join();
             if (webhook == null) {
                 final WebhookClient current = channelIdToWebhook.get(channel.getId());
                 if (current != null) {
@@ -294,9 +342,7 @@ public class JDADiscordService implements DiscordService {
                     return;
                 }
 
-                final String webhookName = "EssX Console Relay";
-                Webhook webhook = DiscordUtil.getAndCleanWebhooks(channel, webhookName).join();
-                webhook = webhook == null ? DiscordUtil.createWebhook(channel, webhookName).join() : webhook;
+                final Webhook webhook = DiscordUtil.getOrCreateWebhook(channel, DiscordUtil.CONSOLE_RELAY_NAME).join();
                 if (webhook == null) {
                     logger.info(tl("discordErrorLoggerNoPerms"));
                     return;
@@ -348,8 +394,10 @@ public class JDADiscordService implements DiscordService {
         }
 
         if (jda != null) {
-            sendMessage(MessageType.DefaultTypes.SERVER_STOP, getSettings().getStopMessage(), true);
-            DiscordUtil.dispatchDiscordMessage(JDADiscordService.this, MessageType.DefaultTypes.SERVER_STOP, getSettings().getStopMessage(), true, null, null, null);
+            if (!invalidStartup) {
+                sendMessage(MessageType.DefaultTypes.SERVER_STOP, getSettings().getStopMessage(), true);
+                DiscordUtil.dispatchDiscordMessage(JDADiscordService.this, MessageType.DefaultTypes.SERVER_STOP, getSettings().getStopMessage(), true, null, null, null);
+            }
 
             shutdownConsoleRelay(true);
 
@@ -408,6 +456,10 @@ public class JDADiscordService implements DiscordService {
 
     public WebhookClient getConsoleWebhook() {
         return consoleWebhook;
+    }
+
+    public boolean isInvalidStartup() {
+        return invalidStartup;
     }
 
     public boolean isDebug() {

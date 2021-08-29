@@ -18,6 +18,8 @@ import java.util.Map;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
+import static com.earth2me.essentials.I18n.tl;
+
 public class DiscordSettings implements IConf {
     private final EssentialsConfiguration config;
     private final EssentialsDiscord plugin;
@@ -119,6 +121,10 @@ public class DiscordSettings implements IConf {
         return config.getBoolean("chat.show-all-chat", false);
     }
 
+    public List<String> getRelayToConsoleList() {
+        return config.getList("chat.relay-to-console", String.class);
+    }
+
     public String getConsoleChannelDef() {
         return config.getString("console.channel", "none");
     }
@@ -135,6 +141,10 @@ public class DiscordSettings implements IConf {
         return config.getBoolean("console.command-relay", false);
     }
 
+    public boolean isConsoleBotCommandRelay() {
+        return config.getBoolean("console.bot-command-relay", false);
+    }
+
     public Level getConsoleLogLevel() {
         return consoleLogLevel;
     }
@@ -145,6 +155,22 @@ public class DiscordSettings implements IConf {
 
     public boolean isShowName() {
         return config.getBoolean("show-name", false);
+    }
+
+    public boolean isShowDisplayName() {
+        return config.getBoolean("show-displayname", false);
+    }
+
+    public String getAvatarURL() {
+        return config.getString("avatar-url", "https://crafthead.net/helm/{uuid}");
+    }
+
+    public boolean isVanishFakeJoinLeave() {
+        return config.getBoolean("vanish-fake-join-leave", true);
+    }
+
+    public boolean isVanishHideMessages() {
+        return config.getBoolean("vanish-hide-messages", true);
     }
 
     // General command settings
@@ -212,7 +238,7 @@ public class DiscordSettings implements IConf {
             filled = format;
         }
         return generateMessageFormat(filled, ":arrow_right: {displayname} has joined!", false,
-                "username", "displayname", "joinmessage");
+                "username", "displayname", "joinmessage", "online", "unique");
     }
 
     public MessageFormat getQuitFormat(Player player) {
@@ -224,7 +250,7 @@ public class DiscordSettings implements IConf {
             filled = format;
         }
         return generateMessageFormat(filled, ":arrow_left: {displayname} has left!", false,
-                "username", "displayname", "quitmessage");
+                "username", "displayname", "quitmessage", "online", "unique");
     }
 
     public MessageFormat getDeathFormat(Player player) {
@@ -263,6 +289,18 @@ public class DiscordSettings implements IConf {
                 "username", "displayname");
     }
 
+    public MessageFormat getAdvancementFormat(Player player) {
+        final String format = getFormatString("advancement");
+        final String filled;
+        if (plugin.isPAPI() && format != null) {
+            filled = me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(player, format);
+        } else {
+            filled = format;
+        }
+        return generateMessageFormat(filled, ":medal: {displayname} has completed the advancement **{advancement}**!", false,
+                "username", "displayname", "advancement");
+    }
+
     public String getStartMessage() {
         return config.getString("messages.server-start", ":white_check_mark: The server has started!");
     }
@@ -294,6 +332,11 @@ public class DiscordSettings implements IConf {
 
     @Override
     public void reloadConfig() {
+        if (plugin.isInvalidStartup()) {
+            plugin.getLogger().warning(tl("discordReloadInvalid"));
+            return;
+        }
+
         config.load();
 
         // Build channel maps
@@ -347,7 +390,7 @@ public class DiscordSettings implements IConf {
                 "timestamp", "level", "message");
 
         discordToMcFormat = generateMessageFormat(getFormatString("discord-to-mc"), "&6[#{channel}] &3{fullname}&7: &f{message}", true,
-                "channel", "username", "discriminator", "fullname", "nickname", "color", "message");
+                "channel", "username", "discriminator", "fullname", "nickname", "color", "message", "role");
         unmuteFormat = generateMessageFormat(getFormatString("unmute"), "{displayname} unmuted.", false, "username", "displayname");
         tempMuteFormat = generateMessageFormat(getFormatString("temporary-mute"), "{controllerdisplayname} has muted player {displayname} for {time}.", false,
                 "username", "displayname", "controllername", "controllerdisplayname", "time");
